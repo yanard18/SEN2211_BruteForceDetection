@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <title>BFDetect — Monitor</title>
+  <style>
+    @keyframes blink { 0%,100% { opacity:1 } 50% { opacity:.25 } }
+    .blink { animation: blink 2s ease-in-out infinite; }
+  </style>
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen px-6 py-6 font-sans">
+
+  <header class="flex items-center justify-between mb-6">
+    <div class="flex items-center gap-2">
+      <svg class="w-5 h-5 text-indigo-400" fill="none" viewBox="0 0 24 24"
+           stroke="currentColor" stroke-width="1.5" xmlns="http://www.w3.org/2000/svg">
+        <path stroke-linecap="round" stroke-linejoin="round"
+          d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6
+             11.955 11.955 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623
+             5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152
+             c-3.196 0-6.1-1.25-8.25-3.285Z" />
+      </svg>
+      <span class="font-semibold">BFDetect</span>
+      <span class="text-gray-600">/</span>
+      <span class="text-gray-400 text-sm">monitor</span>
+    </div>
+    <div class="flex items-center gap-2">
+      <div id="live-dot" class="w-2 h-2 rounded-full bg-green-500 blink"></div>
+      <span class="text-xs text-gray-500 uppercase tracking-widest">Live</span>
+    </div>
+  </header>
+
+  <div class="grid grid-cols-4 gap-3 mb-6">
+    <div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
+      <p class="text-xs text-gray-500 uppercase tracking-widest mb-1">Active IPs</p>
+      <p class="text-2xl font-bold text-gray-100" id="stat-ips">—</p>
+    </div>
+    <div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
+      <p class="text-xs text-gray-500 uppercase tracking-widest mb-1">Blocked</p>
+      <p class="text-2xl font-bold text-red-400" id="stat-blocked">—</p>
+    </div>
+    <div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
+      <p class="text-xs text-gray-500 uppercase tracking-widest mb-1">Threshold</p>
+      <p class="text-2xl font-bold text-indigo-400" id="stat-threshold">—</p>
+    </div>
+    <div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
+      <p class="text-xs text-gray-500 uppercase tracking-widest mb-1">Window</p>
+      <p class="text-2xl font-bold text-gray-100" id="stat-window">—</p>
+    </div>
+  </div>
+
+  <div class="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
+
+    <!-- Column headers -->
+    <div class="grid items-center gap-4 px-5 py-3 border-b border-gray-800"
+         style="grid-template-columns: 160px 110px 68px 1fr">
+      <span class="text-xs font-semibold text-gray-500 uppercase tracking-widest">IP Address</span>
+      <span class="text-xs font-semibold text-gray-500 uppercase tracking-widest">Status</span>
+      <span class="text-xs font-semibold text-gray-500 uppercase tracking-widest text-center">Hits</span>
+      <!-- Timeline axis labels — width and window label match the data -->
+      <div class="flex justify-between text-xs text-gray-600">
+        <span>← <span id="window-label">10</span>s ago</span>
+        <span>now →</span>
+      </div>
+    </div>
+
+    <!-- Rows injected by JS -->
+    <div id="ip-table"></div>
+  </div>
+
+  <p class="text-center text-xs text-gray-700 mt-4">
+    Each dot is a failed login attempt &mdash;
+    dots slide left as they age &mdash;
+    they vanish when the detection window expires
+  </p>
+
+  <script>
+    const THEME = {
+      BLOCKED:  {
+        dot: '#ef4444', glow: 'rgba(239,68,68,0.45)', fill: 'rgba(239,68,68,0.07)',
+        badgeBg: '#450a0a', badgeText: '#fca5a5', badgeBorder: '#7f1d1d',
+      },
+      WATCHING: {
+        dot: '#f59e0b', glow: 'rgba(245,158,11,0.45)', fill: 'rgba(245,158,11,0.07)',
+        badgeBg: '#451a03', badgeText: '#fcd34d', badgeBorder: '#78350f',
+      },
+      CLEAN: {
+        dot: '#22c55e', glow: 'rgba(34,197,94,0.45)', fill: 'rgba(34,197,94,0.07)',
+        badgeBg: '#052e16', badgeText: '#86efac', badgeBorder: '#14532d',
+      },
+    };
+
+    let lastData  = null;   // most recent payload from /status
+    let connected = true;
+
+    async function poll() {
+      try {
+        const res = await fetch('/status');
+        if (!res.ok) throw new Error();
+        lastData = await res.json();
+        setConnected(true);
+      } catch {
+        setConnected(false);
+      }
+    }
+
+    function setConnected(ok) {
+      connected = ok;
+      const dot = document.getElementById('live-dot');
+      dot.className = `w-2 h-2 rounded-full blink ${ok ? 'bg-green-500' : 'bg-red-500'}`;
+    }
+
+    function frame() {
+      if (lastData) draw(lastData, Date.now());
+      requestAnimationFrame(frame);
+    }
+
+    function draw(data, now) {
+      const { threshold, window_ms, ips } = data;
+
+      // Stat cards
+      document.getElementById('stat-ips').textContent       = ips.length;
+      document.getElementById('stat-blocked').textContent   = ips.filter(e => e.status === 'BLOCKED').length;
+      document.getElementById('stat-threshold').textContent = threshold;
+      document.getElementById('stat-window').textContent    = (window_ms / 1000) + 's';
+      document.getElementById('window-label').textContent   = window_ms / 1000;
+
+      const table = document.getElementById('ip-table');
+
+      // Empty state
+      if (ips.length === 0) {
+        if (!table.querySelector('.empty-msg')) {
+          table.innerHTML =
+            '<p class="empty-msg text-center text-gray-600 py-14 text-sm">' +
+            'No activity — waiting for requests…</p>';
+        }
+        return;
+      }
+      table.querySelector('.empty-msg')?.remove();
+
+      // Remove rows whose IP is no longer in the dataset
+      const activeIPs = new Set(ips.map(e => e.ip));
+      table.querySelectorAll('.ip-row').forEach(row => {
+        if (!activeIPs.has(row.dataset.ip)) row.remove();
+      });
+
+      // Update or create each row
+      ips.forEach(entry => {
+        let row = table.querySelector(`.ip-row[data-ip="${entry.ip}"]`);
+        if (!row) {
+          row = makeRow(entry.ip);
+          table.appendChild(row);
+        }
+        updateRow(row, entry, threshold, now, window_ms);
+      });
+    }
+
+    function makeRow(ip) {
+      const row = document.createElement('div');
+      row.className =
+        'ip-row grid items-center gap-4 px-5 py-4 border-b border-gray-800/50';
+      row.style.gridTemplateColumns = '160px 110px 68px 1fr';
+      row.dataset.ip = ip;
+
+      row.innerHTML = `
+        <span class="ip-text  text-sm font-mono text-gray-200 truncate"></span>
+        <span class="ip-badge text-xs font-bold px-2.5 py-1 rounded border text-center inline-block"></span>
+        <span class="ip-hits  text-sm font-mono text-center"></span>
+        <div  class="ip-timeline relative h-7 rounded-lg overflow-hidden"
+              style="background:#111827"></div>
+      `;
+      return row;
+    }
+
+    function updateRow(row, entry, threshold, now, windowMs) {
+      const { ip, hits, status, timestamps } = entry;
+      const c = THEME[status] ?? THEME.CLEAN;
+
+      row.querySelector('.ip-text').textContent = ip;
+
+      const badge = row.querySelector('.ip-badge');
+      badge.textContent = status;
+      badge.style.cssText =
+        `background:${c.badgeBg}; color:${c.badgeText}; border-color:${c.badgeBorder}`;
+
+      const hitsEl = row.querySelector('.ip-hits');
+      hitsEl.textContent = `${hits}/${threshold}`;
+      hitsEl.style.color = c.dot;
+
+      paintTimeline(row.querySelector('.ip-timeline'), timestamps, now, windowMs, threshold, c);
+    }
+
+    function paintTimeline(container, timestamps, now, windowMs, threshold, c) {
+      container.innerHTML = '';
+
+      // Background fill — shows how full the window is relative to threshold
+      const fillPct = Math.min(timestamps.length / threshold, 1) * 100;
+      const fill = el('div', `
+        position:absolute; left:0; top:0; height:100%;
+        width:${fillPct}%; border-radius:8px;
+        background:${c.fill};
+      `);
+      container.appendChild(fill);
+
+      for (let i = 1; i < threshold; i++) {
+        container.appendChild(el('div', `
+          position:absolute; left:${(i / threshold) * 100}%;
+          top:15%; height:70%; width:1px;
+          background:rgba(255,255,255,0.05);
+        `));
+      }
+
+      for (const ts of timestamps) {
+        const age    = now - ts;
+        if (age < 0 || age > windowMs) continue;   // guard against stale data
+        const leftPct = (1 - age / windowMs) * 100;
+
+        const dot = el('div', `
+          position:absolute;
+          left:${leftPct}%; top:50%;
+          transform:translate(-50%,-50%);
+          width:11px; height:11px; border-radius:50%;
+          background:${c.dot};
+          box-shadow:0 0 8px 2px ${c.glow};
+          z-index:1;
+        `);
+        container.appendChild(dot);
+      }
+    }
+
+    function el(tag, css) {
+      const d = document.createElement(tag);
+      d.style.cssText = css;
+      return d;
+    }
+
+    poll();
+    setInterval(poll, 400);
+    requestAnimationFrame(frame);
+  </script>
+</body>
+</html>

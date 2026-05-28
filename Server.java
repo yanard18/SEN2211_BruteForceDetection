@@ -26,15 +26,16 @@ public class Server {
 
     public static void main(String[] args) throws IOException {
         HttpServer server = HttpServer.create(new InetSocketAddress(PORT), 0);
-        server.createContext("/login",  Server::handleLogin);
-        server.createContext("/status", Server::handleStatus);
+        server.createContext("/login",   Server::handleLogin);
+        server.createContext("/monitor", Server::handleMonitor);
+        server.createContext("/status",  Server::handleStatus);
         server.setExecutor(null);
         server.start();
 
         System.out.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
         System.out.println("  BFDetect server running");
-        System.out.printf ("  Login   → http://localhost:%d/login%n",  PORT);
-        System.out.printf ("  Monitor → http://localhost:%d/status%n", PORT);
+        System.out.printf ("  Login   → http://localhost:%d/login%n",   PORT);
+        System.out.printf ("  Monitor → http://localhost:%d/monitor%n", PORT);
         System.out.println("  Threshold : " + DetectionEngine.THRESHOLD + " attempts");
         System.out.println("  Window    : " + DetectionEngine.WINDOW_MS / 1000 + " seconds");
         System.out.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
@@ -54,12 +55,21 @@ public class Server {
     }
 
     private static void serveLoginPage(HttpExchange ex) throws IOException {
-        Path html = Path.of("login.html");
-        if (!Files.exists(html)) {
-            send(ex, 404, "text/plain", "login.html not found");
+        serveFile(ex, "login.html");
+    }
+
+    private static void handleMonitor(HttpExchange ex) throws IOException {
+        if ("GET".equalsIgnoreCase(ex.getRequestMethod())) serveFile(ex, "monitor.html");
+        else send(ex, 405, "text/plain", "Method Not Allowed");
+    }
+
+    private static void serveFile(HttpExchange ex, String filename) throws IOException {
+        Path path = Path.of(filename);
+        if (!Files.exists(path)) {
+            send(ex, 404, "text/plain", filename + " not found");
             return;
         }
-        byte[] body = Files.readAllBytes(html);
+        byte[] body = Files.readAllBytes(path);
         ex.getResponseHeaders().set("Content-Type", "text/html; charset=utf-8");
         ex.sendResponseHeaders(200, body.length);
         try (OutputStream os = ex.getResponseBody()) { os.write(body); }

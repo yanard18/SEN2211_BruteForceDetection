@@ -12,7 +12,7 @@ import java.util.*;
 public class DetectionEngine {
 
     static final int  THRESHOLD = 5;
-    static final long WINDOW_MS = 10_000;
+    static final long WINDOW_MS = 40_000;
 
     // SEN2212: HashMap — O(1) avg lookup per incoming IP
     private final Map<String, LinkedList<Long>> attempts = new HashMap<>();
@@ -72,24 +72,43 @@ public class DetectionEngine {
      */
     public synchronized String toJson() {
         long now = System.currentTimeMillis();
-        StringBuilder sb = new StringBuilder("[");
-        boolean first = true;
+        StringBuilder ips = new StringBuilder("[");
+        boolean firstIp = true;
+
         for (var entry : attempts.entrySet()) {
             String ip = entry.getKey();
             LinkedList<Long> ts = entry.getValue();
+
             ts.removeIf(t -> now - t > WINDOW_MS);
             if (ts.size() < THRESHOLD) blocked.remove(ip);
             int count = ts.size();
-            String status = blocked.contains(ip)                        ? "BLOCKED"
-                          : count >= (int) Math.ceil(THRESHOLD * 0.6)  ? "WATCHING"
+
+            String status = blocked.contains(ip)                       ? "BLOCKED"
+                          : count >= (int) Math.ceil(THRESHOLD * 0.6) ? "WATCHING"
                           : "CLEAN";
-            if (!first) sb.append(",");
-            sb.append(String.format(
-                "{\"ip\":\"%s\",\"hits\":%d,\"threshold\":%d,\"status\":\"%s\"}",
-                ip, count, THRESHOLD, status
+
+            // Serialize timestamps array (oldest → newest, insertion order)
+            StringBuilder tsArr = new StringBuilder("[");
+            boolean firstTs = true;
+            for (long t : ts) {
+                if (!firstTs) tsArr.append(",");
+                tsArr.append(t);
+                firstTs = false;
+            }
+            tsArr.append("]");
+
+            if (!firstIp) ips.append(",");
+            ips.append(String.format(
+                "{\"ip\":\"%s\",\"hits\":%d,\"status\":\"%s\",\"timestamps\":%s}",
+                ip, count, status, tsArr
             ));
-            first = false;
+            firstIp = false;
         }
-        return sb.append("]").toString();
+        ips.append("]");
+
+        return String.format(
+            "{\"threshold\":%d,\"window_ms\":%d,\"ips\":%s}",
+            THRESHOLD, WINDOW_MS, ips
+        );
     }
 }
