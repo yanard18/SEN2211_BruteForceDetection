@@ -7,8 +7,7 @@ import java.util.*;
  *   HashMap<String, LinkedList<Long>> — maps each IP to its timestamp history (SEN2212)
  *   LinkedList<Long> as FIFO queue   — ordered timestamps, O(1) head/tail ops (SEN2211)
  *   HashSet<String>                  — blocked IPs, O(1) membership check
- *
- * All public methods are synchronized — safe for concurrent HTTP handler threads.
+ * 
  */
 public class DetectionEngine {
 
@@ -30,18 +29,14 @@ public class DetectionEngine {
     public synchronized void logAttempt(String ip) {
         long now = System.currentTimeMillis();
 
-        // Step 1 — HashMap insert: O(1) avg
         attempts.putIfAbsent(ip, new LinkedList<>());
         LinkedList<Long> ts = attempts.get(ip);
 
-        // Step 2 — timestamp append: O(1) tail insert
         ts.addLast(now);
 
-        // Step 3 — window expiry: amortised O(1), each timestamp removed at most once
         while (!ts.isEmpty() && now - ts.peekFirst() > WINDOW_MS)
             ts.removeFirst();
 
-        // Step 4 — threshold check: O(1)
         if (ts.size() >= THRESHOLD)
             blocked.add(ip);
     }
@@ -57,13 +52,12 @@ public class DetectionEngine {
         if (ts == null) return false;
         ts.removeIf(t -> now - t > WINDOW_MS);
         if (ts.size() < THRESHOLD)
-            blocked.remove(ip); // auto-unblock when window expires
+            blocked.remove(ip);
         return blocked.contains(ip);
     }
 
     /**
      * Returns the current threat status for an IP: BLOCKED / WATCHING / CLEAN.
-     * Window is pruned before evaluation so the result reflects the live state.
      */
     public synchronized String getStatus(String ip) {
         if (isBlocked(ip)) return "BLOCKED";

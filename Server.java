@@ -12,7 +12,6 @@ import java.util.*;
  *   POST /login  — authenticates; runs detection on failed attempts
  *   GET  /status — returns live IP state as JSON (for monitor page)
  *
- * No external dependencies — uses com.sun.net.httpserver (built into JDK since Java 6).
  *
  * Compile:  javac DetectionEngine.java Server.java
  * Run:      java Server
@@ -29,7 +28,7 @@ public class Server {
         HttpServer server = HttpServer.create(new InetSocketAddress(PORT), 0);
         server.createContext("/login",  Server::handleLogin);
         server.createContext("/status", Server::handleStatus);
-        server.setExecutor(null); // uses default single-threaded executor
+        server.setExecutor(null);
         server.start();
 
         System.out.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
@@ -40,8 +39,6 @@ public class Server {
         System.out.println("  Window    : " + DetectionEngine.WINDOW_MS / 1000 + " seconds");
         System.out.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     }
-
-    // ── Request routing ────────────────────────────────────────────────────────
 
     private static void handleLogin(HttpExchange ex) throws IOException {
         switch (ex.getRequestMethod().toUpperCase()) {
@@ -56,8 +53,6 @@ public class Server {
         send(ex, 200, "application/json", engine.toJson());
     }
 
-    // ── Login page (GET) ───────────────────────────────────────────────────────
-
     private static void serveLoginPage(HttpExchange ex) throws IOException {
         Path html = Path.of("login.html");
         if (!Files.exists(html)) {
@@ -70,12 +65,10 @@ public class Server {
         try (OutputStream os = ex.getResponseBody()) { os.write(body); }
     }
 
-    // ── Login attempt (POST) ───────────────────────────────────────────────────
-
     private static void handlePost(HttpExchange ex) throws IOException {
         String ip = ex.getRemoteAddress().getAddress().getHostAddress();
 
-        // Check block before touching credentials — O(1) HashSet lookup
+        // Check if block before touching credentials
         if (engine.isBlocked(ip)) {
             engine.logAttempt(ip);
             log("BLOCKED ", ip, "rejected before auth (HTTP 429)");
@@ -95,7 +88,7 @@ public class Server {
             return;
         }
 
-        // Wrong credentials — log the attempt and respond
+        // Wrong credentials
         engine.logAttempt(ip);
         String status = engine.getStatus(ip);
         log(status, ip, "wrong credentials");
@@ -106,8 +99,6 @@ public class Server {
             send(ex, 401, "text/html", page401());
         }
     }
-
-    // ── Helpers ────────────────────────────────────────────────────────────────
 
     private static void send(HttpExchange ex, int code, String type, String body) throws IOException {
         byte[] bytes = body.getBytes();
@@ -135,8 +126,6 @@ public class Server {
     private static void log(String status, String ip, String msg) {
         System.out.printf("[%-8s]  %-15s  %s%n", status.trim(), ip, msg);
     }
-
-    // ── Inline response pages ──────────────────────────────────────────────────
 
     private static String page401() {
         return """
